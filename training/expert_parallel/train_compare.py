@@ -22,6 +22,7 @@ import torch
 from transformers import AutoModelForCausalLM
 
 import deepspeed
+from deepspeed.accelerator import get_accelerator
 
 from data_utils import SyntheticBatchGenerator, build_mixtral_config
 from init_weights import load_init_weights_artifact, save_init_weights_artifact
@@ -210,10 +211,10 @@ def main():
         deepspeed.init_distributed()
         rank = int(os.environ.get("RANK", 0))
         world_size = int(os.environ.get("WORLD_SIZE", 1))
-        if torch.cuda.is_available():
+        if get_accelerator().is_available():
             local_rank_env = int(os.environ.get("LOCAL_RANK", args.local_rank))
             if local_rank_env >= 0:
-                torch.cuda.set_device(local_rank_env)
+                get_accelerator().set_device(local_rank_env)
 
     # Setup logging
     logging.basicConfig(
@@ -225,8 +226,8 @@ def main():
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+    if get_accelerator().is_available():
+        get_accelerator().manual_seed_all(args.seed)
     if args.deterministic:
         torch.use_deterministic_algorithms(True)
         torch.backends.cudnn.deterministic = True
@@ -353,7 +354,7 @@ def main():
                 and os.path.isfile(args.load_init_weights)
                 and os.access(args.load_init_weights, os.R_OK)
             )
-            check = torch.tensor([read_ok], device=torch.cuda.current_device())
+            check = torch.tensor([read_ok], device=get_accelerator().current_device_name())
             torch.distributed.broadcast(check, src=0)
             if check.item() != 1:
                 logger.error(
@@ -518,7 +519,7 @@ def main():
     tokens_per_microstep = args.seq_len * args.micro_batch_size
 
     for step in range(start_step, args.steps):
-        torch.cuda.synchronize()
+        get_accelerator().synchronize()
         step_start = time.time()
 
         last_loss = None
@@ -538,7 +539,7 @@ def main():
             engine.backward(loss)
             engine.step()
 
-        torch.cuda.synchronize()
+        get_accelerator().synchronize()
         step_end = time.time()
         iter_time = step_end - step_start
 
@@ -553,7 +554,7 @@ def main():
 
         # Reset peak memory stats after warmup
         if step == args.warmup_steps - 1:
-            torch.cuda.reset_peak_memory_stats()
+            get_accelerator().reset_peak_memory_stats()
 
         # Log metrics for steps >= warmup_steps
         if step >= args.warmup_steps and step % args.log_interval == 0:
@@ -561,9 +562,9 @@ def main():
             max_iter_time = reduce_max(iter_time)
 
             # Memory stats
-            mem_allocated = torch.cuda.memory_allocated()
-            mem_peak_allocated = torch.cuda.max_memory_allocated()
-            mem_peak_reserved = torch.cuda.max_memory_reserved()
+            mem_allocated = get_accelerator().memory_allocated()
+            mem_peak_allocated = get_accelerator().max_memory_allocated()
+            mem_peak_reserved = get_accelerator().max_memory_reserved()
 
             # Throughput
             total_tokens_this_step = tokens_per_microstep * args.grad_accum

@@ -7,6 +7,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+from deepspeed.accelerator import get_accelerator
 
 METRICS_COLUMNS: list[str] = [
     "step",
@@ -81,7 +82,7 @@ def reduce_max(value: float) -> float:
 
     Creates a 1-element tensor on current device, all_reduces with ReduceOp.MAX.
     """
-    tensor = torch.tensor([value], device=torch.cuda.current_device())
+    tensor = torch.tensor([value], device=get_accelerator().current_device_name())
     dist.all_reduce(tensor, op=dist.ReduceOp.MAX)
     return tensor.item()
 

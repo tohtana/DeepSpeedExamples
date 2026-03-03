@@ -221,6 +221,7 @@ def collect_run_metadata(
 ) -> dict[str, Any]:
     """Collect runtime metadata for reproducibility."""
     import torch
+    from deepspeed.accelerator import get_accelerator
 
     # Git SHAs
     script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -242,8 +243,12 @@ def collect_run_metadata(
 
     # NCCL version
     try:
-        nccl_ver = torch.cuda.nccl.version()
-        nccl_version = ".".join(str(v) for v in nccl_ver) if isinstance(nccl_ver, tuple) else str(nccl_ver)
+        accel = get_accelerator()
+        if hasattr(accel, 'communication_backend_version'):
+            nccl_ver = accel.communication_backend_version()
+            nccl_version = ".".join(str(v) for v in nccl_ver) if isinstance(nccl_ver, tuple) else str(nccl_ver)
+        else:
+            nccl_version = "unknown"
     except Exception:
         nccl_version = "unknown"
 
@@ -280,13 +285,14 @@ def collect_run_metadata(
         "torch_version": torch.__version__,
         "transformers_version": importlib.metadata.version("transformers"),
         "deepspeed_version": ds_version,
-        "cuda_version": torch.version.cuda or "unknown",
+        "accelerator": get_accelerator().device_name(),
+        "cuda_version": getattr(torch.version, "cuda", None) or "N/A",
         "nccl_version": nccl_version,
         "driver_version": driver_version,
         "world_size": int(os.environ.get("WORLD_SIZE", 1)),
         "dp_world_size": dp_ws,
         "autoep_size": getattr(args, "autoep_size", None),
-        "num_gpus": torch.cuda.device_count(),
+        "num_gpus": get_accelerator().device_count(),
         "hostname": socket.gethostname(),
         "effective_tokens_per_update": effective_tokens,
         "validation": validation_result,
